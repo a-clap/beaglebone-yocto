@@ -1,0 +1,76 @@
+# https://taskfile.dev
+
+version: '3'
+
+dotenv: ['beaglebone.env']
+
+vars:
+  DOCKER_USER: "yocto"
+  DOCKER_IMAGE: "beaglebone-yocto"
+  MACHINE: "beaglebone-yocto"
+  IMAGE_PATH: 'build/tmp/deploy/images/{{.MACHINE}}'
+  IMAGE: "core-image-full-cmdline"
+
+tasks:
+  default:
+    - task: run
+  run:
+    deps: [build]
+    cmds:
+      - |
+        docker run --rm \
+        -v ./downloads:/home/{{.DOCKER_USER}}/downloads \
+        -v ./sstate:/home/{{.DOCKER_USER}}/sstate \
+        -v ./src:/home/{{.DOCKER_USER}}/src \
+        -v ./build:/home/{{.DOCKER_USER}}/build \
+        -it --user=$(id -u):$(id -g)  {{.DOCKER_IMAGE}}
+  deploy:
+    deps: [umount]
+    vars:
+      DEPLOY_IMAGE: '{{.IMAGE_PATH}}/{{.IMAGE}}-{{.MACHINE}}.wic'
+    cmds:
+      - sudo bmaptool copy {{.DEPLOY_IMAGE}} --bmap {{.DEPLOY_IMAGE}}.bmap $DRIVE
+  fsck:
+    deps: [umount]
+    cmds:
+        - sudo fsck "$DRIVE"2 
+        - sudo fsck "$DRIVE"3 
+        - sudo fsck "$DRIVE"4 
+  clean:
+    cmds:
+      - rm -rf build/tmp
+  artifact:
+    vars:
+      VERSION: 0.1.2
+    cmds:
+      - |
+        mender-artifact write rootfs-image \
+        -t bananapi-zero \
+        -n {{.VERSION}} \
+        --software-version {{.VERSION}} \
+        -f {{.IMAGE_PATH}}/{{.IMAGE}}-{{.MACHINE}}.ext4 \
+        -o {{.VERSION}}.mender
+  build:
+    internal: true
+    cmds:
+      - |
+       docker build \
+       --build-arg USER_NAME={{.DOCKER_USER}} \
+       --build-arg USER_ID=$(id -u) \
+       --build-arg GROUP_ID=$(id -g) \
+       . -t {{.DOCKER_IMAGE}}
+    sources:
+      - Dockerfile
+      - scripts/run.sh
+  umount: 
+    internal: true
+    preconditions:
+      - sh: '[ "$DRIVE" != "" ]'
+        msg: Environment variable DRIVE must be defined
+    silent: true
+    cmds:
+      - |
+        sudo umount "$DRIVE"1 || /bin/true 
+        sudo umount "$DRIVE"2 || /bin/true 
+        sudo umount "$DRIVE"3 || /bin/true 
+        sudo umount "$DRIVE"4 || /bin/true 
